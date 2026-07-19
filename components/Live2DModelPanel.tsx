@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import clsx from 'clsx';
-import { AlertCircle, Loader2, RefreshCw, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { AlertCircle, Loader2, Play, RefreshCw, Shuffle, Sparkles, Undo2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import Live2DViewer, { Live2DLoadProgress, Live2DViewerHandle } from './Live2DViewer';
 
 export type Live2DModelPanelProps = {
@@ -9,6 +9,14 @@ export type Live2DModelPanelProps = {
 };
 
 const FALLBACK_MODEL_PATH = '/live2d/chara/chara.model3.json';
+
+const EXPRESSION_LABELS: Record<string, string> = {
+  black: '黑化',
+  blood: '血迹',
+  flower: '花环',
+  knife: '刀',
+  oil: '石油',
+};
 
 export default function Live2DModelPanel({ defaultModelPath, className }: Live2DModelPanelProps) {
   const viewerRef = useRef<Live2DViewerHandle | null>(null);
@@ -31,6 +39,19 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const [currentScale, setCurrentScale] = useState(1.0);
+  const [actions, setActions] = useState<string[]>([]);
+  const [expressions, setExpressions] = useState<string[]>([]);
+  const [selectedAction, setSelectedAction] = useState('');
+  const [selectedExpression, setSelectedExpression] = useState('');
+
+  const refreshControls = useCallback(() => {
+    const actionNames = viewerRef.current?.getAvailableActions() ?? [];
+    const expressionNames = viewerRef.current?.getAvailableExpressions() ?? [];
+    setActions(actionNames);
+    setExpressions(expressionNames);
+    setSelectedAction((current) => actionNames.includes(current) ? current : actionNames[0] ?? '');
+    setSelectedExpression((current) => expressionNames.includes(current) ? current : expressionNames[0] ?? '');
+  }, []);
 
   const triggerLoad = useCallback(async () => {
     const path = inputPath.trim();
@@ -58,6 +79,10 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
     setLoadProgress(0);
     setLoadStage('starting');
     setLoadError(null);
+    setActions([]);
+    setExpressions([]);
+    setSelectedAction('');
+    setSelectedExpression('');
   }, []);
 
   const handleLoadComplete = useCallback(() => {
@@ -65,7 +90,8 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
     setLoadProgress(100);
     setLoadStage('ready');
     setLoadError(null);
-  }, []);
+    refreshControls();
+  }, [refreshControls]);
 
   const handleLoadError = useCallback((_path: string, error: Error) => {
     setLoadStatus('error');
@@ -76,6 +102,22 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
     setLastAction(actionName);
     window.setTimeout(() => setLastAction(null), 1500);
   }, []);
+
+  const triggerRandomInteraction = useCallback(() => {
+    const modes: Array<'action' | 'expression' | 'both'> = [];
+    if (actions.length > 0) modes.push('action');
+    if (expressions.length > 0) modes.push('expression');
+    if (actions.length > 0 && expressions.length > 0) modes.push('both');
+    if (modes.length === 0) return;
+
+    const mode = modes[Math.floor(Math.random() * modes.length)];
+    if (mode === 'action' || mode === 'both') {
+      viewerRef.current?.playRandomAction();
+    }
+    if (mode === 'expression' || mode === 'both') {
+      void viewerRef.current?.playRandomExpression();
+    }
+  }, [actions.length, expressions.length]);
 
   // Update scale display periodically
   useEffect(() => {
@@ -110,6 +152,7 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
         onLoadComplete={handleLoadComplete}
         onLoadError={handleLoadError}
         onAction={handleAction}
+        onExpression={(expressionName) => handleAction(`表情 · ${expressionName}`)}
       />
 
       <div className="absolute left-3 right-3 top-3 flex flex-col gap-2 md:flex-row md:items-center">
@@ -131,7 +174,77 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
         </button>
       </div>
 
+      <div className="absolute left-3 top-16 z-10 flex max-w-[calc(100%-10rem)] items-center gap-2">
+        <select
+          value={selectedExpression}
+          onChange={(event) => setSelectedExpression(event.target.value)}
+          className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white/90 px-2 py-1.5 text-sm text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          aria-label="选择模型表情"
+          disabled={expressions.length === 0}
+        >
+          {expressions.length === 0 ? (
+            <option>没有可用表情</option>
+          ) : expressions.map((expression) => (
+            <option key={expression} value={expression}>
+              表情：{EXPRESSION_LABELS[expression] ?? expression}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={() => selectedExpression && viewerRef.current?.setExpression(selectedExpression)}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-600 text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+          title="切换表情"
+          aria-label="切换表情"
+          disabled={!selectedExpression}
+        >
+          <Sparkles size={16} />
+        </button>
+        <button
+          onClick={() => viewerRef.current?.resetExpression()}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white/90 text-gray-700 shadow-sm hover:bg-white disabled:cursor-not-allowed disabled:text-gray-400"
+          title="清除表情，恢复默认"
+          aria-label="清除表情，恢复默认"
+          disabled={expressions.length === 0}
+        >
+          <Undo2 size={16} />
+        </button>
+      </div>
+
+      <div className="absolute left-3 top-28 z-10 flex max-w-[calc(100%-2rem)] items-center gap-2">
+        <select
+          value={selectedAction}
+          onChange={(event) => setSelectedAction(event.target.value)}
+          className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white/90 px-2 py-1.5 text-sm text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          aria-label="选择模型动作"
+          disabled={actions.length === 0}
+        >
+          {actions.length === 0 ? (
+            <option>没有可用动作</option>
+          ) : actions.map((action) => (
+            <option key={action} value={action}>动作：{action}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => selectedAction && viewerRef.current?.playAction(selectedAction)}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-600 text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
+          title="播放动作"
+          aria-label="播放动作"
+          disabled={!selectedAction}
+        >
+          <Play size={16} />
+        </button>
+      </div>
+
       <div className="absolute right-3 top-16 flex gap-2">
+        <button
+          onClick={triggerRandomInteraction}
+          className="rounded-full bg-white/80 p-1.5 shadow-sm hover:bg-white transition-colors disabled:cursor-not-allowed disabled:text-gray-400"
+          title="随机触发表情、动作或两者"
+          aria-label="随机触发表情、动作或两者"
+          disabled={actions.length === 0 && expressions.length === 0}
+        >
+          <Shuffle size={16} />
+        </button>
         <button
           onClick={() => {
             viewerRef.current?.zoomIn();

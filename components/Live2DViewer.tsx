@@ -33,6 +33,11 @@ export type Live2DViewerHandle = {
   loadModel: (path: string) => Promise<void>;
   playAction: (actionName: string) => void;
   playRandomAction: () => void;
+  playRandomExpression: () => Promise<boolean>;
+  getAvailableActions: () => string[];
+  getAvailableExpressions: () => string[];
+  setExpression: (expressionName: string) => Promise<boolean>;
+  resetExpression: () => boolean;
   zoomIn: (centerX?: number, centerY?: number) => void;
   zoomOut: (centerX?: number, centerY?: number) => void;
   resetZoom: () => void;
@@ -47,6 +52,7 @@ export type Live2DViewerHandle = {
 export type Live2DViewerProps = {
   modelPath: string;
   onAction?: (actionName: string) => void;
+  onExpression?: (expressionName: string) => void;
   onLoadStart?: (path: string) => void;
   onLoadProgress?: (progress: Live2DLoadProgress) => void;
   onLoadComplete?: (path: string) => void;
@@ -59,6 +65,88 @@ type PixiApp = any;
 
 type Live2DModelInstance = any;
 
+type ParameterAction = {
+  name: string;
+  durationMs: number;
+  cycles: number;
+  parameters: Array<{ id: string; amount: number }>;
+};
+
+type ActiveParameterAction = {
+  definition: ParameterAction;
+  startedAt: number;
+  baseline: Map<string, number>;
+};
+
+type ModelExpression = {
+  name: string;
+  index: number;
+};
+
+type ModelCapabilities = {
+  expressions: ModelExpression[];
+  motionGroups: string[];
+  parameterIds: string[];
+  displayInfoFile?: string;
+};
+
+const PARAMETER_ACTIONS: ParameterAction[] = [
+  {
+    name: '点头',
+    durationMs: 700,
+    cycles: 1,
+    parameters: [{ id: 'ParamAngleY', amount: 15 }],
+  },
+  {
+    name: '摇头',
+    durationMs: 900,
+    cycles: 2,
+    parameters: [{ id: 'ParamAngleX', amount: 25 }],
+  },
+  {
+    name: '看左侧',
+    durationMs: 800,
+    cycles: 1,
+    parameters: [
+      { id: 'ParamAngleX', amount: -20 },
+      { id: 'ParamEyeBallX', amount: -0.8 },
+      { id: 'ParamBodyAngleX', amount: -8 },
+    ],
+  },
+  {
+    name: '看右侧',
+    durationMs: 800,
+    cycles: 1,
+    parameters: [
+      { id: 'ParamAngleX', amount: 20 },
+      { id: 'ParamEyeBallX', amount: 0.8 },
+      { id: 'ParamBodyAngleX', amount: 8 },
+    ],
+  },
+  {
+    name: '挥手',
+    durationMs: 1000,
+    cycles: 2,
+    parameters: [
+      { id: 'Param3', amount: -1 },
+      { id: 'Param4', amount: -1 },
+      { id: 'Param5', amount: 1 },
+      { id: 'Param6', amount: 1 },
+    ],
+  },
+  {
+    name: '微笑',
+    durationMs: 900,
+    cycles: 1,
+    parameters: [
+      { id: 'ParamMouthForm', amount: 1 },
+      { id: 'ParamCheek', amount: 0.8 },
+      { id: 'ParamEyeLSmile', amount: 0.6 },
+      { id: 'ParamEyeRSmile', amount: 0.6 },
+    ],
+  },
+];
+
 const CLICK_FLASH_MS = 120;
 
 function toError(err: unknown): Error {
@@ -66,11 +154,82 @@ function toError(err: unknown): Error {
   return new Error(typeof err === 'string' ? err : 'Unknown error');
 }
 
+function getDefinitionName(definition: unknown, index: number): string {
+  const value = definition as Record<string, unknown> | null;
+  const configuredName = value?.Name ?? value?.name;
+  if (typeof configuredName === 'string' && configuredName.trim()) {
+    return configuredName.trim();
+  }
+
+  const file = value?.File ?? value?.file;
+  if (typeof file === 'string' && file.trim()) {
+    const filename = file.split('/').pop() ?? file;
+    return filename.replace(/\.(exp3|exp)\.json$/i, '');
+  }
+
+  return String(index);
+}
+
+function getModelCapabilities(data: unknown): ModelCapabilities {
+  const model = data as Record<string, any> | null;
+  const fileReferences = model?.FileReferences ?? model?.fileReferences ?? {};
+  const expressionDefinitions =
+    fileReferences.Expressions ??
+    fileReferences.expressions ??
+    model?.Expressions ??
+    model?.expressions ??
+    [];
+  const motionDefinitions =
+    fileReferences.Motions ??
+    fileReferences.motions ??
+    model?.Motions ??
+    model?.motions ??
+    {};
+
+  const expressions = Array.isArray(expressionDefinitions)
+    ? expressionDefinitions.map((definition, index) => ({
+        name: getDefinitionName(definition, index),
+        index,
+      }))
+    : [];
+  const motionGroups =
+    motionDefinitions && typeof motionDefinitions === 'object' && !Array.isArray(motionDefinitions)
+      ? Object.keys(motionDefinitions)
+      : [];
+  const displayInfo = fileReferences.DisplayInfo ?? fileReferences.displayInfo;
+
+  return {
+    expressions,
+    motionGroups,
+    parameterIds: [],
+    displayInfoFile: typeof displayInfo === 'string' ? displayInfo : undefined,
+  };
+}
+
+async function loadParameterIds(modelPath: string, displayInfoFile?: string): Promise<string[]> {
+  if (!displayInfoFile || typeof window === 'undefined') return [];
+
+  try {
+    const displayInfoPath = new URL(displayInfoFile, new URL(modelPath, window.location.href)).toString();
+    const response = await fetch(displayInfoPath);
+    if (!response.ok) return [];
+
+    const displayInfo = await response.json();
+    if (!Array.isArray(displayInfo?.Parameters)) return [];
+    return displayInfo.Parameters
+      .map((parameter: any) => parameter?.Id ?? parameter?.id)
+      .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
+  } catch {
+    return [];
+  }
+}
+
 export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
   function Live2DViewer(
     {
       modelPath,
       onAction,
+      onExpression,
       onLoadStart,
       onLoadProgress,
       onLoadComplete,
@@ -90,10 +249,15 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
     const initPromiseRef = useRef<Promise<void> | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
     const loadTokenRef = useRef(0);
+    const lifecycleTokenRef = useRef(0);
     const disposedRef = useRef(false);
     const dragManagerRef = useRef<DragManager | null>(null);
     const scaleManagerRef = useRef<ScaleManager | null>(null);
     const lockManagerRef = useRef<LockManager | null>(null);
+    const activeParameterActionRef = useRef<ActiveParameterAction | null>(null);
+    const expressionDefinitionsRef = useRef<ModelExpression[]>([]);
+    const motionGroupsRef = useRef<string[]>([]);
+    const parameterIdsRef = useRef<Set<string>>(new Set());
 
     const [isClickFlashing, setIsClickFlashing] = useState(false);
     const [isLocked, setIsLocked] = useState(false);
@@ -194,7 +358,65 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
         // ignore
       } finally {
         modelRef.current = null;
+        activeParameterActionRef.current = null;
+        expressionDefinitionsRef.current = [];
+        motionGroupsRef.current = [];
+        parameterIdsRef.current = new Set();
       }
+    }, []);
+
+    const loadModelCapabilities = useCallback(async (path: string): Promise<ModelCapabilities> => {
+      try {
+        const response = await fetch(path);
+        if (!response.ok) {
+          return { expressions: [], motionGroups: [], parameterIds: [] };
+        }
+        const data = await response.json();
+        const capabilities = getModelCapabilities(data);
+        capabilities.parameterIds = await loadParameterIds(path, capabilities.displayInfoFile);
+        return capabilities;
+      } catch {
+        return { expressions: [], motionGroups: [], parameterIds: [] };
+      }
+    }, []);
+
+    const updateParameterAction = useCallback(() => {
+      const action = activeParameterActionRef.current;
+      const coreModel = modelRef.current?.internalModel?.coreModel;
+      if (!action || !coreModel?.setParameterValueById) return;
+
+      const progress = (performance.now() - action.startedAt) / action.definition.durationMs;
+      if (progress >= 1) {
+        for (const [id, value] of action.baseline) {
+          coreModel.setParameterValueById(id, value, 1);
+        }
+        activeParameterActionRef.current = null;
+        return;
+      }
+
+      const strength = Math.sin(Math.PI * action.definition.cycles * progress);
+      for (const parameter of action.definition.parameters) {
+        const baseline = action.baseline.get(parameter.id) ?? 0;
+        coreModel.setParameterValueById(parameter.id, baseline + parameter.amount * strength, 1);
+      }
+    }, []);
+
+    const startParameterAction = useCallback((definition: ParameterAction): boolean => {
+      const coreModel = modelRef.current?.internalModel?.coreModel;
+      if (!coreModel?.setParameterValueById) return false;
+
+      const baseline = new Map(
+        definition.parameters.map((parameter) => [
+          parameter.id,
+          coreModel.getParameterValueById?.(parameter.id) ?? 0,
+        ])
+      );
+      activeParameterActionRef.current = {
+        definition,
+        startedAt: performance.now(),
+        baseline,
+      };
+      return true;
     }, []);
 
     // Zoom and Lock functionality using ScaleManager
@@ -307,6 +529,8 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
       if (appRef.current) return;
       if (!containerRef.current) return;
 
+      const lifecycleToken = lifecycleTokenRef.current;
+
       if (initPromiseRef.current) {
         await initPromiseRef.current;
         return;
@@ -316,8 +540,14 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
         const PIXI = await import('pixi.js');
         pixiRef.current = PIXI;
 
+        if (lifecycleToken !== lifecycleTokenRef.current) return;
+
         const container = containerRef.current;
         if (!container) return;
+
+        // React Strict Mode may finish an earlier async initialization after cleanup.
+        // Start from an empty container so an orphan canvas cannot cover the active model.
+        container.replaceChildren();
 
         const app = new PIXI.Application({
           width: Math.max(1, container.clientWidth),
@@ -327,6 +557,11 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
           backgroundAlpha: 0,
           resolution: typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1,
         });
+
+        if (lifecycleToken !== lifecycleTokenRef.current) {
+          app.destroy(true, { children: true, texture: true, baseTexture: true });
+          return;
+        }
 
         appRef.current = app;
 
@@ -382,6 +617,12 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
         if (!model) return;
 
         try {
+          const parameterAction = PARAMETER_ACTIONS.find((action) => action.name === actionName);
+          if (parameterAction) {
+            if (startParameterAction(parameterAction)) onAction?.(actionName);
+            return;
+          }
+
           onAction?.(actionName);
 
           if (typeof model.motion === 'function') {
@@ -398,35 +639,96 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
           console.error('Failed to play Live2D action:', actionName, error);
         }
       },
-      [onAction]
+      [onAction, startParameterAction]
     );
 
-    const getAvailableMotionGroups = useCallback((): string[] => {
+    const getAvailableActions = useCallback((): string[] => {
       const model = modelRef.current;
-      if (!model) return [];
+      const actions = PARAMETER_ACTIONS
+        .filter((action) => action.parameters.every((parameter) => parameterIdsRef.current.has(parameter.id)))
+        .map((action) => action.name);
+      const configuredGroups = motionGroupsRef.current;
+      if (!model) return [...new Set([...actions, ...configuredGroups])];
 
       const fromSettings = model.internalModel?.settings?.motions;
       if (fromSettings && typeof fromSettings === 'object') {
         const keys = Object.keys(fromSettings);
-        if (keys.length > 0) return keys;
+        return [...new Set([...actions, ...configuredGroups, ...keys])];
       }
 
       const fromMotionManager = model.internalModel?.motionManager?.motionGroups;
       if (fromMotionManager && typeof fromMotionManager === 'object') {
         const keys = Object.keys(fromMotionManager);
-        if (keys.length > 0) return keys;
+        return [...new Set([...actions, ...configuredGroups, ...keys])];
       }
 
-      return ['Idle', 'TapBody', 'TapHead'];
+      return [...new Set([...actions, ...configuredGroups])];
     }, []);
 
     const playRandomAction = useCallback(() => {
-      const groups = getAvailableMotionGroups();
+      const groups = getAvailableActions();
       if (groups.length === 0) return;
 
       const actionName = groups[Math.floor(Math.random() * groups.length)];
       playAction(actionName);
-    }, [getAvailableMotionGroups, playAction]);
+    }, [getAvailableActions, playAction]);
+
+    const getAvailableExpressions = useCallback((): string[] => {
+      return expressionDefinitionsRef.current.map((expression) => expression.name);
+    }, []);
+
+    const setExpression = useCallback(
+      async (expressionName: string): Promise<boolean> => {
+        const model = modelRef.current;
+        const expression = expressionDefinitionsRef.current.find(
+          (definition) => definition.name === expressionName
+        );
+          if (!model || !expression) return false;
+
+        try {
+          if (typeof model.expression === 'function') {
+            // pixi-live2d-display resolves the Cubism expression by its configured Name.
+            let applied = await model.expression(expression.name);
+            if (!applied) applied = await model.expression(expression.index);
+            if (!applied) return false;
+          } else if (model.internalModel?.expressionManager?.setExpression) {
+            let applied = await model.internalModel.expressionManager.setExpression(expression.name);
+            if (!applied) applied = await model.internalModel.expressionManager.setExpression(expression.index);
+            if (!applied) return false;
+          } else {
+            return false;
+          }
+          onExpression?.(expressionName);
+          return true;
+        } catch (error) {
+          console.error('Failed to set Live2D expression:', expressionName, error);
+          return false;
+        }
+      },
+      [onExpression]
+    );
+
+    const playRandomExpression = useCallback(async (): Promise<boolean> => {
+      const expressions = getAvailableExpressions();
+      if (expressions.length === 0) return false;
+
+      const expressionName = expressions[Math.floor(Math.random() * expressions.length)];
+      return setExpression(expressionName);
+    }, [getAvailableExpressions, setExpression]);
+
+    const resetExpression = useCallback((): boolean => {
+      const expressionManager = modelRef.current?.internalModel?.expressionManager;
+      if (!expressionManager?.resetExpression) return false;
+
+      try {
+        expressionManager.resetExpression();
+        onExpression?.('已恢复默认');
+        return true;
+      } catch (error) {
+        console.error('Failed to reset Live2D expression:', error);
+        return false;
+      }
+    }, [onExpression]);
 
     const flashClick = useCallback(() => {
       setIsClickFlashing(true);
@@ -514,6 +816,14 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
 
           modelRef.current = model;
           app.stage.addChild(model);
+          const capabilities = await loadModelCapabilities(path);
+          expressionDefinitionsRef.current = capabilities.expressions;
+          motionGroupsRef.current = capabilities.motionGroups;
+          parameterIdsRef.current = new Set(capabilities.parameterIds);
+
+          if (disposedRef.current || token !== loadTokenRef.current) {
+            return;
+          }
 
           model.interactive = true;
           model.buttonMode = true;
@@ -582,6 +892,7 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
 
           tickerFnRef.current = () => {
             model.update?.(app.ticker.deltaMS);
+            updateParameterAction();
           };
           app.ticker.add(tickerFnRef.current);
 
@@ -602,16 +913,19 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
         fitModelToView,
         flashClick,
         isLocked,
+        loadModelCapabilities,
         onLoadComplete,
         onLoadError,
         onLoadProgress,
         onLoadStart,
         playRandomAction,
+        updateParameterAction,
       ]
     );
 
     const dispose = useCallback(() => {
       disposedRef.current = true;
+      lifecycleTokenRef.current += 1;
 
       const app = appRef.current;
       if (app) {
@@ -648,6 +962,11 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
         loadModel,
         playAction,
         playRandomAction,
+        playRandomExpression,
+        getAvailableActions,
+        getAvailableExpressions,
+        setExpression,
+        resetExpression,
         zoomIn,
         zoomOut,
         resetZoom,
@@ -658,7 +977,22 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
         lockManager: lockManagerRef.current,
         dispose,
       }),
-      [dispose, loadModel, playAction, playRandomAction, zoomIn, zoomOut, resetZoom, setScale, getScale]
+      [
+        dispose,
+        loadModel,
+        playAction,
+        playRandomAction,
+        playRandomExpression,
+        getAvailableActions,
+        getAvailableExpressions,
+        setExpression,
+        resetExpression,
+        zoomIn,
+        zoomOut,
+        resetZoom,
+        setScale,
+        getScale,
+      ]
     );
 
     useEffect(() => {
