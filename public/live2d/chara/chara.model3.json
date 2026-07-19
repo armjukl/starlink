@@ -6,7 +6,14 @@
 			"chara.2048/texture_00.png"
 		],
 		"Physics": "chara.physics3.json",
-		"DisplayInfo": "chara.cdi3.json"
+		"DisplayInfo": "chara.cdi3.json",
+		"Expressions": [
+			{ "Name": "black", "File": "expressions/black.exp3.json" },
+			{ "Name": "blood", "File": "expressions/blood.exp3.json" },
+			{ "Name": "flower", "File": "expressions/flower.exp3.json" },
+			{ "Name": "knife", "File": "expressions/knife.exp3.json" },
+			{ "Name": "oil", "File": "expressions/oil.exp3.json" }
+		]
 	},
 	"Groups": [
 		{
