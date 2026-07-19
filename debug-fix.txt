@@ -1,0 +1,39 @@
+{/* Debug Information Panel */}
+                            {process.env.NODE_ENV === 'development' && (
+                              <div className="mt-6 bg-gray-800 text-gray-300 rounded-lg p-4 text-xs font-mono">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <AlertCircle size={14} />
+                                  <span className="font-semibold">调试信息</span>
+                                </div>
+                                <div className="space-y-1">
+                                  <div>浏览器: {environmentInfo.secure ? 'HTTPS' : 'HTTP'} ({environmentInfo.hostname})</div>
+                                  <div>支持: WebSocket={environmentInfo.webSocketSupported ? '✅' : '❌'}</div>
+                                  <div>麦克风权限: {permissionStatus}</div>
+                                  <div>连接测试: {connectionTestStatus}</div>
+                                  <div>网络状态: {connectionStatus}</div>
+                                  {connectionTestMessage && (
+                                    <div className="pt-1 border-t border-gray-700">
+                                      <div className="text-yellow-300">连接测试: {connectionTestMessage}</div>
+                                    </div>
+                                  )}
+                                  {browserCompatibility && (
+                                    <div className="pt-1 border-t border-gray-700">
+                                      <div>兼容性: getUserMedia={browserCompatibility.getUserMedia ? '✅' : '❌'}</div>
+                                      <div>推荐: {browserCompatibility.recommended ? '✅' : '❌'}</div>
+                                      {browserCompatibility.issues.length > 0 && (
+                                        <div className="text-yellow-300 mt-1">
+                                          问题: {browserCompatibility.issues.join(', ')}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                       </div>
+                    </div>
+                 </div>
+              </div>
+            );
+          }

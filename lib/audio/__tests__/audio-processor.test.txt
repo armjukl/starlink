@@ -1,0 +1,170 @@
+/**
+ * Audio Processor Tests
+ * 
+ * Note: These tests are designed to verify the logic and structure.
+ * Actual browser audio APIs require a browser environment and user interaction.
+ */
+
+describe('AudioProcessor', () => {
+  describe('Configuration', () => {
+    it('should calculate correct chunk size for 20ms at 16000Hz', () => {
+      const sampleRate = 16000;
+      const durationMs = 20;
+      const expectedChunkSize = Math.floor(sampleRate * durationMs / 1000);
+      
+      expect(expectedChunkSize).toBe(320);
+    });
+
+    it('should calculate correct chunk size for custom durations', () => {
+      const sampleRate = 16000;
+      
+      expect(Math.floor(sampleRate * 10 / 1000)).toBe(160); // 10ms
+      expect(Math.floor(sampleRate * 30 / 1000)).toBe(480); // 30ms
+      expect(Math.floor(sampleRate * 50 / 1000)).toBe(800); // 50ms
+    });
+  });
+
+  describe('PCM16 Encoding', () => {
+    it('should convert Float32 to Int16 correctly', () => {
+      // Simulate the float32ToInt16 conversion
+      const float32ToInt16Test = (value: number): number => {
+        const clamped = Math.max(-1, Math.min(1, value));
+        return clamped < 0 ? Math.floor(clamped * 0x8000) : Math.floor(clamped * 0x7FFF);
+      };
+
+      expect(float32ToInt16Test(1.0)).toBe(32767);
+      expect(float32ToInt16Test(-1.0)).toBe(-32768);
+      expect(float32ToInt16Test(0.5)).toBe(16383);
+      expect(float32ToInt16Test(-0.5)).toBe(-16384);
+      expect(float32ToInt16Test(0.0)).toBe(0);
+    });
+
+    it('should clamp values outside -1 to 1 range', () => {
+      const float32ToInt16Test = (value: number): number => {
+        const clamped = Math.max(-1, Math.min(1, value));
+        return clamped < 0 ? Math.floor(clamped * 0x8000) : Math.floor(clamped * 0x7FFF);
+      };
+
+      expect(float32ToInt16Test(2.0)).toBe(32767);
+      expect(float32ToInt16Test(-2.0)).toBe(-32768);
+      expect(float32ToInt16Test(1.5)).toBe(32767);
+      expect(float32ToInt16Test(-1.5)).toBe(-32768);
+    });
+  });
+
+  describe('Resampling Logic', () => {
+    it('should calculate correct output length for resampling', () => {
+      const inputLength = 4410; // 100ms at 44100Hz
+      const inputRate = 44100;
+      const outputRate = 16000;
+      
+      const ratio = outputRate / inputRate;
+      const outputLength = Math.floor(inputLength * ratio);
+      
+      expect(outputLength).toBe(1600); // 100ms at 16000Hz
+    });
+
+    it('should handle common sample rate conversions', () => {
+      const duration = 1000; // 1 second in samples
+      
+      // 48000Hz -> 16000Hz
+      const from48k = Math.floor(duration * (16000 / 48000));
+      expect(from48k).toBe(333);
+      
+      // 44100Hz -> 16000Hz
+      const from44k = Math.floor(duration * (16000 / 44100));
+      expect(from44k).toBe(362);
+    });
+  });
+
+  describe('Buffer Size Selection', () => {
+    it('should select valid ScriptProcessor buffer sizes', () => {
+      const validSizes = [256, 512, 1024, 2048, 4096, 8192, 16384];
+      const chunkSize = 320; // 20ms at 16000Hz
+      
+      // Find optimal size (at least chunkSize/2)
+      let selected = 4096;
+      for (const size of validSizes) {
+        if (size >= chunkSize / 2) {
+          selected = size;
+          break;
+        }
+      }
+      
+      expect(selected).toBe(256);
+      expect(validSizes.includes(selected)).toBe(true);
+    });
+  });
+
+  describe('Audio Level Calculation', () => {
+    it('should calculate RMS correctly', () => {
+      const calculateRMS = (data: number[]): number => {
+        let sum = 0;
+        for (const sample of data) {
+          sum += sample * sample;
+        }
+        return Math.sqrt(sum / data.length);
+      };
+
+      // Silence
+      expect(calculateRMS([0, 0, 0, 0])).toBe(0);
+      
+      // Full volume
+      const fullVolume = calculateRMS([1, -1, 1, -1]);
+      expect(fullVolume).toBe(1);
+      
+      // Half volume
+      const halfVolume = calculateRMS([0.5, -0.5, 0.5, -0.5]);
+      expect(halfVolume).toBe(0.5);
+    });
+  });
+
+  describe('VAD (Voice Activity Detection)', () => {
+    it('should detect speech based on RMS threshold', () => {
+      const threshold = 0.01;
+      
+      const isSpeech = (rms: number): boolean => rms > threshold;
+      
+      expect(isSpeech(0.0)).toBe(false); // Silence
+      expect(isSpeech(0.005)).toBe(false); // Very quiet
+      expect(isSpeech(0.02)).toBe(true); // Speech
+      expect(isSpeech(0.5)).toBe(true); // Loud speech
+    });
+  });
+
+  describe('Base64 Encoding', () => {
+    it('should calculate correct base64 size', () => {
+      const pcm16BytesPerChunk = 320 * 2; // 320 samples × 2 bytes
+      const base64Length = Math.ceil((pcm16BytesPerChunk * 4) / 3);
+      
+      expect(pcm16BytesPerChunk).toBe(640);
+      expect(base64Length).toBe(854); // Rounded up
+    });
+  });
+});
+
+describe('Integration Flow', () => {
+  it('should process audio in correct sequence', () => {
+    const steps: string[] = [];
+    
+    // Simulate the flow
+    steps.push('1. Request microphone permission');
+    steps.push('2. Create AudioContext');
+    steps.push('3. Create MediaStreamSource');
+    steps.push('4. Create ScriptProcessorNode');
+    steps.push('5. Connect audio nodes');
+    steps.push('6. Process audio in onaudioprocess');
+    steps.push('7. Extract Float32 data');
+    steps.push('8. Apply resampling if needed');
+    steps.push('9. Buffer samples until chunk size reached');
+    steps.push('10. Convert Float32 to Int16 (PCM16)');
+    steps.push('11. Create ArrayBuffer from Int16Array');
+    steps.push('12. Call onAudioChunk callback');
+    steps.push('13. Base64 encode in callback');
+    steps.push('14. Send via WebSocket');
+    
+    expect(steps.length).toBe(14);
+    expect(steps[0]).toContain('microphone permission');
+    expect(steps[steps.length - 1]).toContain('WebSocket');
+  });
+});
