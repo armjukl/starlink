@@ -65,7 +65,7 @@ npm run dev
 4. **开始对话** → 直接说话，AI 自动响应
 5. **享受体验** → 支持多轮对话和智能打断
 
-详细步骤请查看 [快速开始指南](./QUICK_START.md)
+按上述步骤即可完成本地启动与首次对话。
 
 ---
 
@@ -126,28 +126,6 @@ npm run dev
 - **应用状态**: idle | listening | processing | speaking
 - **权限状态**: not_requested | requesting | granted | denied
 - **测试状态**: not_tested | testing | success | failed
-
----
-
-## 📚 文档
-
-### 核心文档
-
-- 📖 [快速开始指南](./QUICK_START.md) - 5分钟快速体验
-- 📘 [完整实现文档](./VAD_WORKFLOW_IMPLEMENTATION.md) - VAD 工作流详细说明
-- ✅ [测试指南](./TESTING_GUIDE.md) - 完整的测试检查表
-- 🔧 [集成指南](./INTEGRATION_GUIDE.md) - 如何集成到你的项目
-
-### API 文档
-
-- 📊 [Qwen-Omni API 文档](./QWEN_OMNI_README.md) - API 参考
-- 📝 [事件系统实现](./QWEN_OMNI_EVENTS_IMPLEMENTATION.md) - 事件处理详解
-- 🎤 [音频采集实现](./AUDIO_CAPTURE_IMPLEMENTATION.md) - 音频处理详解
-
-### 故障排查
-
-- 🔧 [音频质量修复总结](./AUDIO_FIX_SUMMARY.md) - 音频刺耳问题解决方案
-- ❓ [常见问题 FAQ](#常见问题-faq)
 
 ---
 
@@ -282,7 +260,7 @@ npm test
 
 ### 手动测试
 
-使用 [测试指南](./TESTING_GUIDE.md) 中的完整检查表进行手动测试：
+建议在目标浏览器中完成以下手动测试：
 
 - ✅ 浏览器兼容性测试
 - ✅ 麦克风权限测试
@@ -376,7 +354,7 @@ A: 我们已在 v1.1.0 中修复了这个问题。如果仍有问题：
 2. 清除浏览器缓存并重新加载
 3. 尝试降低音量到 50-60%
 4. 查看控制台日志中的音频统计信息
-5. 参考 [音频质量修复文档](./AUDIO_FIX_SUMMARY.md)
+5. 查看浏览器控制台中的音频统计信息
 
 **Q: 为什么听不到声音？**
 
@@ -465,7 +443,7 @@ A: 建议：
 - ✅ 添加软限幅保护（±0.95）
 - ✅ 添加详细的音频统计日志
 
-**问题修复：** 彻底解决了 AI 返回语音刺耳、失真的问题。详见 [AUDIO_FIX_SUMMARY.md](./AUDIO_FIX_SUMMARY.md)
+**问题修复：** 彻底解决了 AI 返回语音刺耳、失真的问题。
 
 ### v1.0.0 (2024-12-17)
 
