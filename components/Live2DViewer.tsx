@@ -37,7 +37,7 @@ export type Live2DViewerHandle = {
   getAvailableActions: () => string[];
   getAvailableExpressions: () => string[];
   setExpression: (expressionName: string) => Promise<boolean>;
-  resetExpression: () => boolean;
+  resetExpression: () => Promise<boolean>;
   zoomIn: (centerX?: number, centerY?: number) => void;
   zoomOut: (centerX?: number, centerY?: number) => void;
   resetZoom: () => void;
@@ -258,6 +258,7 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
     const expressionDefinitionsRef = useRef<ModelExpression[]>([]);
     const motionGroupsRef = useRef<string[]>([]);
     const parameterIdsRef = useRef<Set<string>>(new Set());
+    const expressionGenerationRef = useRef(0);
 
     const [isClickFlashing, setIsClickFlashing] = useState(false);
     const [isLocked, setIsLocked] = useState(false);
@@ -685,15 +686,28 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
         );
           if (!model || !expression) return false;
 
+        // Stale-proof token: if the user clicks reset (or switches to another
+        // expression) while this one is still loading, the ExpressionManager's
+        // built-in reserveExpressionIndex mechanism (invalidated by
+        // resetExpression) will already discard the late result. The token
+        // check below simply prevents our onExpression callback from firing
+        // with a no-longer-wanted name.
+        const myGen = ++expressionGenerationRef.current;
+        const isStale = () => myGen !== expressionGenerationRef.current;
+
         try {
           if (typeof model.expression === 'function') {
             // pixi-live2d-display resolves the Cubism expression by its configured Name.
             let applied = await model.expression(expression.name);
+            if (isStale()) return false;
             if (!applied) applied = await model.expression(expression.index);
+            if (isStale()) return false;
             if (!applied) return false;
-          } else if (model.internalModel?.expressionManager?.setExpression) {
-            let applied = await model.internalModel.expressionManager.setExpression(expression.name);
-            if (!applied) applied = await model.internalModel.expressionManager.setExpression(expression.index);
+          } else if ((model as any).internalModel?.motionManager?.expressionManager?.setExpression) {
+            let applied = await (model as any).internalModel.motionManager.expressionManager.setExpression(expression.name);
+            if (isStale()) return false;
+            if (!applied) applied = await (model as any).internalModel.motionManager.expressionManager.setExpression(expression.index);
+            if (isStale()) return false;
             if (!applied) return false;
           } else {
             return false;
@@ -716,14 +730,40 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
       return setExpression(expressionName);
     }, [getAvailableExpressions, setExpression]);
 
-    const resetExpression = useCallback((): boolean => {
-      const expressionManager = modelRef.current?.internalModel?.expressionManager;
-      if (!expressionManager?.resetExpression) return false;
+    const resetExpression = useCallback(async (): Promise<boolean> => {
+      const model = modelRef.current;
+      if (!model) return false;
+
+      // Invalidate any in-flight setExpression so a late-arriving load cannot
+      // re-apply an expression after we have cleared the model state.
+      expressionGenerationRef.current++;
 
       try {
-        expressionManager.resetExpression();
-        onExpression?.('已恢复默认');
-        return true;
+        // The official ExpressionManager API (pixi-live2d-display /
+        // CubismWebFramework) provides a public resetExpression() that
+        // replaces the current expression with the built-in defaultExpression
+        // (a CubismExpressionMotion created from an empty `{}` — no parameter
+        // overrides). The expression manager lives on the motionManager, not
+        // directly on the internal model.
+        const expressionManager =
+          (model as any).internalModel?.motionManager?.expressionManager;
+
+        if (expressionManager && typeof expressionManager.resetExpression === 'function') {
+          // ExpressionManager.setExpression() guards itself with an internal
+          // `reserveExpressionIndex` so that only the most recently requested
+          // expression is actually applied after the async load completes.
+          // By resetting this index to -1 we make sure any stale
+          // setExpression still in-flight is discarded instead of overwriting
+          // the default expression we are about to apply.
+          if (typeof expressionManager.reserveExpressionIndex === 'number') {
+            expressionManager.reserveExpressionIndex = -1;
+          }
+          expressionManager.resetExpression();
+          onExpression?.('已恢复默认');
+          return true;
+        }
+
+        return false;
       } catch (error) {
         console.error('Failed to reset Live2D expression:', error);
         return false;
@@ -820,6 +860,10 @@ export const Live2DViewer = forwardRef<Live2DViewerHandle, Live2DViewerProps>(
           expressionDefinitionsRef.current = capabilities.expressions;
           motionGroupsRef.current = capabilities.motionGroups;
           parameterIdsRef.current = new Set(capabilities.parameterIds);
+
+          // Reset the expression generation so any stale in-flight load from a
+          // previous model cannot apply itself to the new one.
+          expressionGenerationRef.current++;
 
           if (disposedRef.current || token !== loadTokenRef.current) {
             return;

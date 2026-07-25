@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import clsx from 'clsx';
-import { AlertCircle, Loader2, Play, RefreshCw, Shuffle, Sparkles, Undo2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
+import { AlertCircle, Loader2, Play, RefreshCw, Shuffle, Sparkles, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react';
 import Live2DViewer, { Live2DLoadProgress, Live2DViewerHandle } from './Live2DViewer';
 
 export type Live2DModelPanelProps = {
@@ -50,7 +50,7 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
     setActions(actionNames);
     setExpressions(expressionNames);
     setSelectedAction((current) => actionNames.includes(current) ? current : actionNames[0] ?? '');
-    setSelectedExpression((current) => expressionNames.includes(current) ? current : expressionNames[0] ?? '');
+    setSelectedExpression((current) => expressionNames.includes(current) ? current : '');
   }, []);
 
   const triggerLoad = useCallback(async () => {
@@ -180,10 +180,10 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
           onChange={(event) => setSelectedExpression(event.target.value)}
           className="min-w-0 flex-1 rounded-md border border-gray-300 bg-white/90 px-2 py-1.5 text-sm text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           aria-label="选择模型表情"
-          disabled={expressions.length === 0}
         >
+          <option value="">无（恢复默认）</option>
           {expressions.length === 0 ? (
-            <option>没有可用表情</option>
+            <option disabled>没有可用表情</option>
           ) : expressions.map((expression) => (
             <option key={expression} value={expression}>
               表情：{EXPRESSION_LABELS[expression] ?? expression}
@@ -191,22 +191,18 @@ export default function Live2DModelPanel({ defaultModelPath, className }: Live2D
           ))}
         </select>
         <button
-          onClick={() => selectedExpression && viewerRef.current?.setExpression(selectedExpression)}
+          onClick={() => {
+            if (!selectedExpression) {
+              viewerRef.current?.resetExpression();
+            } else {
+              viewerRef.current?.setExpression(selectedExpression);
+            }
+          }}
           className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-blue-600 text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-400"
-          title="切换表情"
-          aria-label="切换表情"
-          disabled={!selectedExpression}
+          title={selectedExpression ? '切换表情' : '恢复默认（无表情）'}
+          aria-label={selectedExpression ? '切换表情' : '恢复默认（无表情）'}
         >
           <Sparkles size={16} />
-        </button>
-        <button
-          onClick={() => viewerRef.current?.resetExpression()}
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-gray-300 bg-white/90 text-gray-700 shadow-sm hover:bg-white disabled:cursor-not-allowed disabled:text-gray-400"
-          title="清除表情，恢复默认"
-          aria-label="清除表情，恢复默认"
-          disabled={expressions.length === 0}
-        >
-          <Undo2 size={16} />
         </button>
       </div>
 
